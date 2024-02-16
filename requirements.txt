@@ -5,3 +5,4 @@
 azure-functions
 pandas>=1.0.0
 requests>=2.0.0
+azure-communication-sms~=1.0

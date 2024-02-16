@@ -2,10 +2,11 @@ import logging
 import azure.functions as func
 import requests
 import pandas as pd
+from azure.communication.sms import SmsClient
 
 
-
-def find_earliest_unpaired_event(df):
+def FindUnpairedEvents(df):
+    #Identifes Any 
     events = {}
 
     event_split = df['Event'].str.rsplit('-', n=1, expand=True)
@@ -17,47 +18,55 @@ def find_earliest_unpaired_event(df):
     for index, row in df.iterrows():
         event = row['Event']
         value = row['Value']
-        timestamp = pd.to_datetime(row['Event_Time'])
-        type = row['Type']
-        expected_end= pd.to_datetime(row['Expected_End'])
-        delta = row['Delta']
+        timestamp = row['Event_Time']
 
         if event not in events:
-            events[event] = {'on': [], 'off': []}
+            events[event] = {'on': [], 'off': [] ,'Timestamp': pd.to_datetime(row['Event_Time']), 'Value': row['Value'], 'Type': row['Type'], 'Expected_End': pd.to_datetime(row['Expected_End']), 'Delta': row['Delta']}
         
         events[event][value].append(timestamp)
+        #events[event][value].append({'Timestamp': pd.to_datetime(row['Event_Time']), 'Value': row['Value'], 'Type': row['Type'], 'Expected_End': pd.to_datetime(row['Expected_End']), 'Delta': row['Delta']})
 
     earliest_unpaired_events = []
-    for event, times in events.items():
-        on_times = sorted(times['on'])
-        off_times = sorted(times['off'])
+   # for event, times, Type, Expected_End, Timestamp, Delta in events.items():
+    for event, data in events.items():
+
+        Type = data['Type']
+        Expected_End = data['Expected_End']
+        Timestamp = data['Timestamp']
+        Delta = data['Delta']
+
+        on_times = sorted(data['on'])
+        off_times = sorted(data['off'])        
+
 
         paired = min(len(on_times), len(off_times))
         unpaired_on = on_times[paired:]
         unpaired_off = off_times[paired:]
 
         if unpaired_on:  # Unpaired 'on' events
+            #Event didnt start - we are missing an On event
             for timestamp in unpaired_on:
                 earliest_unpaired_events.append({
-                    'Event': event,
-                    'Missing_status': 'off',
-                    'Event_Time': timestamp.isoformat(),
-                    'Type': type,
-                    'Expected_End':expected_end,
-                    'Delta': delta
+                    'Event':event,
+                    'Event_Status': 'off',
+                    'Event_Time': Timestamp.isoformat(),
+                    'Type': Type,
+                    'Expected_End':Expected_End,
+                    'Delta': Delta
 
                 })
                 break  # Report only the earliest unpaired 'on' event
 
-        elif unpaired_off:  # Unpaired 'off' events, less likely but possible
+        elif unpaired_off:  
+            #Event started but didnt finish
             for timestamp in unpaired_off:
                 earliest_unpaired_events.append({
                     'Event': event,
-                    'Missing_status': 'on',
-                    'Event_Time': timestamp.isoformat(),
-                    'Type': type,
-                    'Expected_End':expected_end,
-                    'Delta': delta
+                    'Event_Status': 'on',
+                    'Event_Time': Timestamp.isoformat(),
+                    'Type': Type,
+                    'Expected_End':Expected_End,
+                    'Delta': Delta
                 })
                 break  # Report only the earliest unpaired 'off' event
 
@@ -67,17 +76,71 @@ def find_earliest_unpaired_event(df):
 
     return earliest_unpaired_events
 
+
+def SendSMS(AlertData):
+     
+    ConnectionString = 'endpoint=https://firstrespondersms.unitedstates.communication.azure.com/;accesskey=3OWojht0Xjuilyyb7g5DCA4riP4Y3OnjyAGXozVK9/Sj/uoqSZvXpbyM6O4ssG6APkRAkqeGKiz1TwpDKwppGw=='
+
+    # Create an SMS client using the connection string
+    sms_client = SmsClient.from_connection_string(ConnectionString)
+    sms_phonenumber = '+18332419135'
+    #sms_phonenumber ='5555'
+    recipiant_number = '+18573030250'
+    print(AlertData)
+    
+    # Get the first entry from the array
+
+    # Iterate through the AlertData array
+    messagetext = ''
+    sms_response = 'No SMS Required'
+    for data in AlertData:
+        
+        # Access elements of the first entry
+
+        if data['Type'] == 'Missed':
+            # Build the message string with other values
+            messagetext += f"Silversense Alert: Event: {data['Event']}, Status: {data['Type']}, Expected: {data['Expected_End']}. Variance {data['Delta']} \n"
+
+
+    print(messagetext)
+
+    if messagetext !=  '':
+        try:
+            # Send an SMS
+            logging.info(f"Sending SMS to {sms_phonenumber}:{messagetext}")
+            sms_response ='Failed'
+            
+            #sms_response = sms_client.send(
+            #    from_=sms_phonenumber,  # The phone number associated with your Azure Communication Services resource
+            #    to=[recipiant_number],  # The recipient's phone number
+            #    message=messagetext,
+            #    # Optional parameters
+            #    enable_delivery_report=True,  # For delivery reports
+            #    tag="")  # Custom tag to identify messages
+            
+
+            # SMS response provides message IDs and status
+            for message in sms_response:
+                print(f"Message ID: {message.message_id} Sent to: {message.to}")
+        except Exception as e:
+            print(f"Error sending SMS: {e}")
+            raise e
+
+    return sms_response
+
+
 app = func.FunctionApp()
 
 @app.schedule(schedule="0 */5 * * * *", arg_name="myTimer", run_on_startup=True,
               use_monitor=False) 
+
 def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
     if myTimer.past_due:
         logging.info('The timer is past due!')
 
-    logging.info('Python timer trigger function executed with Pandas and request imported.')
+    logging.info('First Responder Version 1.0 Triggered from Timer.')
 
- 
+    
 try:
     url = "https://silversense.azurewebsites.net/data"
     params = {
@@ -109,23 +172,20 @@ if response.status_code == 200:
     data = pd.DataFrame(response.json())
     logging.info('Data Loaded Into Dataframe')
     # Find the earliest unpaired events
-    df_query_string = 'Type =="Missed" or Type == "Missing"'
-    anomalydata = data.query(df_query_string)
+
     try:
-        alertdata = find_earliest_unpaired_event(anomalydata)
-        logging.info(f"Alert Events: {alertdata}")
+        #Check returned data set for 2 things
+        # 1.  Are there any events that are on but no off, or off but no on.  E.g. Not returned from dogwalk, not returned to bed, door open not closed. 
+        UnpairedData = FindUnpairedEvents(data)
+        logging.info(f"Alert Events: {UnpairedData}")
+        # Then 2. Are any of those considered Missing
+        SendSMS(UnpairedData)
+
     except Exception as e:
             logging.error("Error Processing Alert Events")
             raise e
     
-    df_query_string = 'Type =="Late" or Type == "Early"'
-    anomalydata = data.query(df_query_string)
-    try:
-        warningdata = find_earliest_unpaired_event(anomalydata)
-        logging.info(f"Warning Events: {warningdata}")
-    except Exception as e:
-            logging.error("Error Processing Warning Events")
-            raise e    
+
 
 else:
-     logging.error(f"Failed to fetch data: {responsecode}")
+    logging.error(f"Failed to fetch data: {responsecode}")
