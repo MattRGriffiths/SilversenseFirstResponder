@@ -2,79 +2,76 @@ import logging
 import azure.functions as func
 import requests
 import pandas as pd
+import pymysql
 from azure.communication.sms import SmsClient
 from azure.communication.email import EmailClient
 
 def FindUnpairedEvents(df):
-    #Identifes Any 
-    events = {}
-
+   # Ensure Event_Time is in datetime format and sort the DataFrame
+    df['Event_Time'] = pd.to_datetime(df['Event_Time'])
+    df = df.sort_values(by='Event_Time', ascending=True)
+    
     event_split = df['Event'].str.rsplit('-', n=1, expand=True)
+    df['EventName'] = event_split[0]
+    df['State'] = event_split[1]
 
-# Assign the split results to new columns in the DataFrame
-    df['Event'] = event_split[0]
-    df['Value'] = event_split[1]
+    events = {}
+    unpaired_events = {}
 
     for index, row in df.iterrows():
-        event = row['Event']
-        value = row['Value']
-        timestamp = row['Event_Time']
+        event = row['EventName']
+        state = row['State']
+        event_type = row['Type']
+        timestamp = pd.to_datetime(row['Event_Time'])
+        expected_end = pd.to_datetime(row['Expected_End'])
+        delta = row['Delta']
 
         if event not in events:
-            events[event] = {'on': [], 'off': [] ,'Timestamp': pd.to_datetime(row['Event_Time']), 'Value': row['Value'], 'Type': row['Type'], 'Expected_End': pd.to_datetime(row['Expected_End']), 'Delta': row['Delta']}
-        
-        events[event][value].append(timestamp)
-        #events[event][value].append({'Timestamp': pd.to_datetime(row['Event_Time']), 'Value': row['Value'], 'Type': row['Type'], 'Expected_End': pd.to_datetime(row['Expected_End']), 'Delta': row['Delta']})
+            events[event] = {'on': None, 'off': None, 'details': {}}
 
-    earliest_unpaired_events = []
-   # for event, times, Type, Expected_End, Timestamp, Delta in events.items():
-    for event, data in events.items():
-
-        Type = data['Type']
-        Expected_End = data['Expected_End']
-        Timestamp = data['Timestamp']
-        Delta = data['Delta']
-
-        on_times = sorted(data['on'])
-        off_times = sorted(data['off'])        
-
-
-        paired = min(len(on_times), len(off_times))
-        unpaired_on = on_times[paired:]
-        unpaired_off = off_times[paired:]
-
-        if unpaired_on:  # Unpaired 'on' events
-            #Event didnt start - we are missing an On event
-            for timestamp in unpaired_on:
-                earliest_unpaired_events.append({
+        if state == 'on':
+            if events[event]['on'] is not None and events[event]['off'] is None:
+                # If an "on" event occurs without an "off", update the unpaired event
+                unpaired_events[event] = f'Missing "off" before new "on" at {timestamp}'
+            events[event]['on'] = timestamp
+            events[event]['off'] = None  # Reset "off" when a new "on" is encountered
+        elif state == 'off':
+            if events[event]['on'] is None:
+                # If an "off" event occurs without an "on", update the unpaired event
+                unpaired_events[event] = {
                     'Event':event,
-                    'Event_Status': 'off',
-                    'Event_Time': Timestamp.isoformat(),
-                    'Type': Type,
-                    'Expected_End':Expected_End,
-                    'Delta': Delta
+                    'Missing_Status' :'on',
+                    'Type': event_type,
+                    'Timestamp': timestamp,
+                    'Expected_End': expected_end,
+                    'Delta': delta
+                    }
+            else:
+                # Once a proper pair is completed, remove the event from unpaired if it exists
+                unpaired_events.pop(event, None)
+            events[event]['on'] = None  # Reset "on" after an "off" is encountered
+            events[event]['off'] = timestamp
 
-                })
-                break  # Report only the earliest unpaired 'on' event
+    # After processing all rows, check for any "on" events without a corresponding "off"
+    for event, info in events.items():
+        if info['on'] is not None:
+            # Assuming event type, expected time, and delta for the last "on" event
+            unpaired_events[event] = {
+                'Missing_Status': 'off',
+                'Type': event_type,  # This might need adjustment to reflect accurate event details
+                'Timestamp': info['on'],
+                'Expected_End': expected_end,  # Similar note as above
+                'Delta': delta  # Similar note as above
+            }
 
-        elif unpaired_off:  
-            #Event started but didnt finish
-            for timestamp in unpaired_off:
-                earliest_unpaired_events.append({
-                    'Event': event,
-                    'Event_Status': 'on',
-                    'Event_Time': Timestamp.isoformat(),
-                    'Type': Type,
-                    'Expected_End':Expected_End,
-                    'Delta': Delta
-                })
-                break  # Report only the earliest unpaired 'off' event
+   # return [(event, details['Missing_Status'], details['Type'], details['Timestamp'], details['Expected_Time'], details['Delta']) for event, details in unpaired_events.items()]
+    return unpaired_events
 
-    # Filter the array for items where Type is either "Missed" or "Missing"
-   # filtered_earliest_unpaired_events = [item for item in earliest_unpaired_events if item['Type'] in ('Missed', 'Missing')]
-
-
-    return earliest_unpaired_events
+# Example usage:
+# Ensure your DataFrame 'df' is properly defined with 'Event', 'Event_Time', and other columns as per your setup
+# unpaired_events = find_last_unpaired_events(df)
+# for event_info in unpaired_events:
+#     print(event_info)
 
 
 
@@ -84,13 +81,13 @@ def SendEmail(AlertData):
     messagetext = ''
     sms_response = 'No SMS Required'
     emailto = "matt@griffiths.uk.net"
-    for data in AlertData:
+    for event, data in AlertData.items():
         
         # Access elements of the first entry
 
         if data['Type'] == 'Missed':
             # Build the message string with other values
-            messagetext += f"Silversense Alert: Event: {data['Event']}, Status: {data['Type']}, Expected: {data['Expected_End']}. Variance {data['Delta']}"
+            messagetext += f"Silversense Alert: Event: {event} : {data['Missing_Status']}, Status: {data['Type']}, Expected From: {data['Expected_End']}. Variance {data['Delta']}. "
 
 
     print(messagetext)
@@ -98,7 +95,7 @@ def SendEmail(AlertData):
     if messagetext !=  '':
         try:
             # Send an SMS
-            logging.info(f"Sending SMS to matt@griffiths.uk.net:{messagetext}")
+            logging.info(f"Sending email to matt@griffiths.uk.net:{messagetext}")
 
             connection_string = "endpoint=https://firstrespondersms.unitedstates.communication.azure.com/;accesskey=3OWojht0Xjuilyyb7g5DCA4riP4Y3OnjyAGXozVK9/Sj/uoqSZvXpbyM6O4ssG6APkRAkqeGKiz1TwpDKwppGw=="
             client = EmailClient.from_connection_string(connection_string)
@@ -124,7 +121,7 @@ def SendEmail(AlertData):
                 print(e)
 
         except Exception as e:
-            print(e)
+            logging.error("Error Sending Email", e)
             raise e
 
 def SendWhatsApp(AlertData):
@@ -165,6 +162,7 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress, ):
         logging.info("Data inserted successfully")
         
     except pymysql.MySQLError as e:
+        
         raise e
 
     finally:
@@ -239,7 +237,7 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         params = {
             "member": "Griffiths0001",
             "useday": "true",
-            "starthour": "21",
+            "starthour": "05",
             "mincluster": "3",
             "debug": "none",
             "threshold": "20",
