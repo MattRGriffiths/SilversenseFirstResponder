@@ -5,6 +5,11 @@ import pandas as pd
 import pymysql
 from azure.communication.sms import SmsClient
 from azure.communication.email import EmailClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
+import os
+import json
 
 def FindUnpairedEvents(df):
    # Ensure Event_Time is in datetime format and sort the DataFrame
@@ -139,7 +144,46 @@ def SendWhatsApp(AlertData):
 
     text_response = notification_messages_client.send_message(send_text_message_options)
 
-def LogResponse(Member,ResponseMessage, Action, ResponseAddress, ):
+def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
+
+    server = 'silversensemysql.mysql.database.azure.com'
+    username = 'MattRGriffiths'
+    password = 'AgeInPlace1576'
+    database = 'silversense'
+    
+    #"mysql+pymysql://MattRGriffiths:AgeInPlace1576@silversensemysql.mysql.database.azure.com/silversense"
+    connection_string = os.getenv('SilverSenseMySQL')
+     #connection_string = f"mysql+pymysql://{username}:{password}@{server}/{database}"
+
+    try:
+        # Connect to MySQL
+        logging.info(f"ConnectionString: {connection_string}")
+        logging.info("Starting mySQL")
+       
+        engine = create_engine(connection_string, echo=True)
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        # Define your SQL query using text()
+        sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, NOW())")
+
+        with engine.connect() as connection:
+            # Execute the query with parameters as a dictionary
+            connection.execute(sql, {
+                'member': Member,
+                'response_message': ResponseMessage,
+                'action': Action,
+                'response_address': ResponseAddress
+            })
+
+        
+               
+    except Exception as e:
+        logging.error("Error Sending Email", e)
+        raise e
+    return 'Success'
+
+def LogResponse2(Member,ResponseMessage, Action, ResponseAddress, ):
 
     host = 'silversensemysql.mysql.database.azure.com'
     user = 'MattRGriffiths'
@@ -227,59 +271,74 @@ app = func.FunctionApp()
               use_monitor=False) 
 
 def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
-    if myTimer.past_due:
-        logging.info('The timer is past due!')
-
-    logging.info('First Responder Version 1.1 Triggered from Timer.')
 
     try:
+        if myTimer.past_due:
+            logging.info('The timer is past due!')
+
+        logging.info('First Responder Version 1.3.1. Get Param and Convert to json')
+
+        
         url = "https://silversense.azurewebsites.net/data"
-        params = {
-            "member": "Griffiths0001",
-            "useday": "true",
-            "starthour": "05",
-            "mincluster": "3",
-            "debug": "none",
-            "threshold": "20",
-            "grouptime": "0"
-        }
+
+        params_var = {"member": "Griffiths0001","useday": "false","starthour": "05","mincluster": "3","debug": "none","threshold": "20","grouptime": "0"}
+
+        params_env_str = "{\"member\": \"Griffiths0001\", \"useday\": \"false\", \"starthour\": \"05\", \"mincluster\": \"3\", \"debug\": \"none\", \"threshold\": \"20\", \"grouptime\": \"0\"}"
+        params_env_str2 = os.getenv('SilverSenseURLParam')
 
 
-        # Make the GET request
-        response = requests.get(url, verify=False , params=params)
+        params_var_type = type(params_var) 
+        params_env_str_type = type(params_env_str2)
+       
 
-        logging.info(f"Requested Submitted with parameters: {params}")
+        # Convert the string back to a dictionary
+        params_env = json.loads(params_env_str)
+        params_env_json_type = type(params_env)
 
-    except Exception as e:
-            # Check if the request was successful
-            responsecode = f"code: {response.status_code} . Message: {response.text}"
-            logging.error(responsecode)
-            raise e
-
-    responsecode = f"code: {response.status_code} . Message: {response.text}"
-
-    if response.status_code == 200:
-        # Convert the JSON response to a Pandas DataFrame
-        data = pd.DataFrame(response.json())
-        logging.info('Data Loaded Into Dataframe')
-        # Find the earliest unpaired events
-
+        logging.info(f"var: Type {params_var_type}.  {params_var}.  env Type {params_env_str_type}. {params_env_str2}. json Type {params_env_json_type}. {params_env}")
+        
         try:
-            #Check returned data set for 2 things
-            # 1.  Are there any events that are on but no off, or off but no on.  E.g. Not returned from dogwalk, not returned to bed, door open not closed. 
-            UnpairedData = FindUnpairedEvents(data)
-            logging.info(f"Alert Events: {UnpairedData}")
-            # Then 2. Are any of those considered Missing
-            SendEmail(UnpairedData)
-            #SendSMS(UnpairedData)
+            logging.info(f"Requested Submitted with env parameters: {params_env}")
+
+            # Make the GET request
+            response = requests.get(url, verify=False, params=params_env)
+
+            logging.info(f"Response Success with parameters: {params_env}")
 
         except Exception as e:
-                logging.error("Error Processing Alert Events")
+                # Check if the request was successful
+                responsecode = f"code: {response.status_code} . Message: {response.text}"
+                logging.error(responsecode)
                 raise e
-        
+
+        responsecode = f"code: {response.status_code} . Message: {response.text}"
+
+        if response.status_code == 200:
+            # Convert the JSON response to a Pandas DataFrame
+            data = pd.DataFrame(response.json())
+            logging.info('Data Loaded Into Dataframe')
+            # Find the earliest unpaired events
+
+            try:
+                #Check returned data set for 2 things
+                # 1.  Are there any events that are on but no off, or off but no on.  E.g. Not returned from dogwalk, not returned to bed, door open not closed. 
+                UnpairedData = FindUnpairedEvents(data)
+                logging.info(f"Alert Events: {UnpairedData}")
+                # Then 2. Are any of those considered Missing
+                SendEmail(UnpairedData)
+                #SendSMS(UnpairedData)
+
+            except Exception as e:
+                    logging.error("Error Processing Alert Events")
+                    raise e
+            
 
 
-    else:
-        logging.error(f"Failed to fetch data: {responsecode}")
+        else:
+            logging.error(f"Failed to fetch data: {responsecode}")
+            
+    except Exception as e:
+        logging.error("Error Processing First Responder", e)
+        raise e
 
 
