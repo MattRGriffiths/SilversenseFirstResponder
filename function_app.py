@@ -84,29 +84,35 @@ def SendEmail(AlertData):
 
    # Iterate through the AlertData array
     messagetext = ''
+    logmessage = ''
     sms_response = 'No SMS Required'
     emailto = "matt@griffiths.uk.net"
+
+    logging.info(f"Preparing email to matt@griffiths.uk.net:{messagetext}")
     for event, data in AlertData.items():
         
         # Access elements of the first entry
 
         if data['Type'] == 'Missed':
-            # Build the message string with other values
+            # Build the message string with other values except for delta since that creates a unique value for each event
+            logmessage += f"Silversense Alert: Event: {event} : {data['Missing_Status']}, Status: {data['Type']}, Expected From: {data['Expected_End']}."
+            #This is the message that will be sent to the email
             messagetext += f"Silversense Alert: Event: {event} : {data['Missing_Status']}, Status: {data['Type']}, Expected From: {data['Expected_End']}. Variance {data['Delta']}. "
-
-
-    print(messagetext)
 
     if messagetext !=  '':
         try:
             # Send an SMS
-            logging.info(f"Sending email to matt@griffiths.uk.net:{messagetext}")
+            logging.info(f"Preparing email to matt@griffiths.uk.net:{messagetext}")
 
-            connection_string = "endpoint=https://firstrespondersms.unitedstates.communication.azure.com/;accesskey=3OWojht0Xjuilyyb7g5DCA4riP4Y3OnjyAGXozVK9/Sj/uoqSZvXpbyM6O4ssG6APkRAkqeGKiz1TwpDKwppGw=="
+                #Get the connection string from the environment variable
+            connection_string = os.getenv('CUSTOMCONNSTR_SilverSenseEmail')
+            #connection_string = "endpoint=https://firstrespondersms.unitedstates.communication.azure.com/;accesskey=3OWojht0Xjuilyyb7g5DCA4riP4Y3OnjyAGXozVK9/Sj/uoqSZvXpbyM6O4ssG6APkRAkqeGKiz1TwpDKwppGw=="
             client = EmailClient.from_connection_string(connection_string)
+            
             try:
-                LogResponse('Griffiths0001',messagetext,'email',emailto) 
-           
+                #Log transaction into database. If its a unique event, it will be logged.  If its a duplicate, it will fail and be ignored.
+                LogResponse('Griffiths0001',logmessage,'email',emailto) 
+                # Create the email message
                 message = {
                                 "senderAddress": "Silversense@880cace6-bb7a-463e-8e0f-ad8ce0e38166.azurecomm.net",
                                 "recipients":  {
@@ -117,13 +123,14 @@ def SendEmail(AlertData):
                                     "plainText": messagetext,
                                 }
                             }
-
+                # Send the email
                 poller = client.begin_send(message)
                 result = poller.result()
+                logging.info(f"Email sent to matt@griffiths.uk.net. Result:{result}")
                     
             except Exception as e:
                 #expect error here when pulling duplicate events / actions
-                print(e)
+                 logging.info(f"Database Response {e}")
 
         except Exception as e:
             logging.error("Error Sending Email", e)
@@ -146,20 +153,16 @@ def SendWhatsApp(AlertData):
 
 def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
 
-    server = 'silversensemysql.mysql.database.azure.com'
-    username = 'MattRGriffiths'
-    password = 'AgeInPlace1576'
-    database = 'silversense'
     
-    #"mysql+pymysql://MattRGriffiths:AgeInPlace1576@silversensemysql.mysql.database.azure.com/silversense"
-    connection_string = os.getenv('SilverSenseMySQL')
-     #connection_string = f"mysql+pymysql://{username}:{password}@{server}/{database}"
+    #Get the connection string from the environment variable
+    connection_string = os.getenv('MYSQLCONNSTR_SilverSenseMySQL')
 
     try:
         # Connect to MySQL
         logging.info(f"ConnectionString: {connection_string}")
         logging.info("Starting mySQL")
-       
+
+        # Create an engine to connect to the database
         engine = create_engine(connection_string, echo=True)
         Session = sessionmaker(bind=engine)
         session = Session()
@@ -167,21 +170,25 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
         # Define your SQL query using text()
         sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, NOW())")
 
+
+        params = {
+            'member': Member,  # Ensure Member and others are defined
+            'response_message': ResponseMessage,
+            'action': Action,
+            'response_address': ResponseAddress
+        }
+
         with engine.connect() as connection:
             # Execute the query with parameters as a dictionary
-            connection.execute(sql, {
-                'member': Member,
-                'response_message': ResponseMessage,
-                'action': Action,
-                'response_address': ResponseAddress
-            })
+            connection.execute(sql, params)
 
-        
+            # Commit the transaction
+            logging.info("Data inserted successfully")
                
     except Exception as e:
         logging.error("Error Sending Email", e)
         raise e
-    return 'Success'
+
 
 def LogResponse2(Member,ResponseMessage, Action, ResponseAddress, ):
 
@@ -273,29 +280,28 @@ app = func.FunctionApp()
 def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
 
     try:
-        if myTimer.past_due:
+        if myTimer.past_due:    
             logging.info('The timer is past due!')
 
-        logging.info('First Responder Version 1.3.1. Get Param and Convert to json')
+        logging.info('First Responder Version 1.3.5. Startng.')
 
         
         url = "https://silversense.azurewebsites.net/data"
 
-        params_var = {"member": "Griffiths0001","useday": "false","starthour": "05","mincluster": "3","debug": "none","threshold": "20","grouptime": "0"}
-
-        params_env_str = "{\"member\": \"Griffiths0001\", \"useday\": \"false\", \"starthour\": \"05\", \"mincluster\": \"3\", \"debug\": \"none\", \"threshold\": \"20\", \"grouptime\": \"0\"}"
-        params_env_str2 = os.getenv('SilverSenseURLParam')
-
-
-        params_var_type = type(params_var) 
-        params_env_str_type = type(params_env_str2)
+         
+        logging.info('Loeading Strings')
+        #params_env_str = "{\"member\": \"Griffiths0001\", \"useday\": \"false\", \"starthour\": \"05\", \"mincluster\": \"3\", \"debug\": \"none\", \"threshold\": \"20\", \"grouptime\": \"0\"}"
+        params_env_str = os.getenv('SilverSenseURLParam')
        
 
         # Convert the string back to a dictionary
+        logging.info(f"Loading {params_env_str} into json object.  Checking type.")
         params_env = json.loads(params_env_str)
         params_env_json_type = type(params_env)
 
-        logging.info(f"var: Type {params_var_type}.  {params_var}.  env Type {params_env_str_type}. {params_env_str2}. json Type {params_env_json_type}. {params_env}")
+        logstring = f"Using Parameters from Env Type {params_env_json_type}. {params_env}"
+        
+        logging.info(logstring)
         
         try:
             logging.info(f"Requested Submitted with env parameters: {params_env}")
