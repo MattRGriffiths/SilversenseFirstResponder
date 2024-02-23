@@ -8,6 +8,7 @@ from azure.communication.email import EmailClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 import os
 import json
 import datetime 
@@ -167,11 +168,16 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
         engine = create_engine(connection_string, echo=True)
         Session = sessionmaker(bind=engine)
         session = Session()
-
+        
         # Define your SQL query using text()
-        sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, :response_time")
         ResponseTime = datetime.now().isoformat()
         logging.info(f"Adding Parameters to SQL Query: {Member}, {ResponseMessage}, {Action}, {ResponseAddress}, {ResponseTime}")
+
+        sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, :response_time")
+        
+        logging.info("SQL Created. Adding Parameters to params object")
+                
+
         params = {
             'member': Member,  # Ensure Member and others are defined
             'response_message': ResponseMessage,
@@ -284,7 +290,7 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         if myTimer.past_due:    
             logging.info('The timer is past due!')
 
-        logging.info('First Responder Version 1.3 Build 10. Starting.')
+        logging.info('First Responder Version 1.3 Build 12. Starting.')
 
         
         url = "https://silversense.azurewebsites.net/data"
