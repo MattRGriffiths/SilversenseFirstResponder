@@ -191,7 +191,7 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
         raise e
 
 
-def LogResponse(Member,ResponseMessage, Action, ResponseAddress, ):
+def LogResponse2(Member,ResponseMessage, Action, ResponseAddress ):
 
     host = 'silversensemysql.mysql.database.azure.com'
     user = 'MattRGriffiths'
@@ -284,7 +284,7 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         if myTimer.past_due:    
             logging.info('The timer is past due!')
 
-        logging.info('First Responder Version 1.3 Build 9. Startng.')
+        logging.info('First Responder Version 1.3 Build 10. Starting.')
 
         
         url = "https://silversense.azurewebsites.net/data"
