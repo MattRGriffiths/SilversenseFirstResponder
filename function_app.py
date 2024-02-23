@@ -161,7 +161,7 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
     try:
         # Connect to MySQL
         logging.info(f"ConnectionString: {connection_string}")
-        logging.info("Starting mySQL")
+        logging.info("Starting mySQL Connection")
 
         # Create an engine to connect to the database
         engine = create_engine(connection_string, echo=True)
@@ -170,15 +170,16 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
 
         # Define your SQL query using text()
         sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, :response_time")
-        current_timestamp = datetime.now().isoformat()
-        logging.info("Adding Parameters to SQL Query")
+        ResponseTime = datetime.now().isoformat()
+        logging.info(f"Adding Parameters to SQL Query: {Member}, {ResponseMessage}, {Action}, {ResponseAddress}, {ResponseTime}")
         params = {
             'member': Member,  # Ensure Member and others are defined
             'response_message': ResponseMessage,
             'action': Action,
             'response_address': ResponseAddress,
-            'response_time': current_timestamp
+            'response_time': ResponseTime
         }
+        logging.info("Executing SQL Query")
         # Execute the query
         with engine.connect() as connection:
             # Execute the query with parameters as a dictionary
@@ -186,11 +187,11 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
             logging.info("Data inserted successfully")
                
     except Exception as e:
-        logging.error("Error Sending Email", e)
+        logging.error("Database Execution Error", e)
         raise e
 
 
-def LogResponse2(Member,ResponseMessage, Action, ResponseAddress, ):
+def LogResponse(Member,ResponseMessage, Action, ResponseAddress, ):
 
     host = 'silversensemysql.mysql.database.azure.com'
     user = 'MattRGriffiths'
@@ -283,7 +284,7 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         if myTimer.past_due:    
             logging.info('The timer is past due!')
 
-        logging.info('First Responder Version 1.3.8. Startng.')
+        logging.info('First Responder Version 1.3 Build 9. Startng.')
 
         
         url = "https://silversense.azurewebsites.net/data"
