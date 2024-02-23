@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 import os
 import json
-import datetime 
+from datetime import datetime
 
 def FindUnpairedEvents(df):
    # Ensure Event_Time is in datetime format and sort the DataFrame
@@ -35,6 +35,13 @@ def FindUnpairedEvents(df):
 
         if event not in events:
             events[event] = {'on': None, 'off': None, 'details': {}}
+
+            # Update or add additional details
+            events[event]['details'] = {
+                'event_type': event_type,
+                'timestamp': timestamp,  # Last timestamp seen for this event
+                'expected_end': expected_end,
+                'delta': delta
 
         if state == 'on':
             if events[event]['on'] is not None and events[event]['off'] is None:
@@ -61,15 +68,19 @@ def FindUnpairedEvents(df):
 
     # After processing all rows, check for any "on" events without a corresponding "off"
     for event, info in events.items():
-        if info['on'] is not None:
-            # Assuming event type, expected time, and delta for the last "on" event
+        if info['on'] is not None:  # There's an "on" event without a corresponding "off" event
+            # Retrieve previously stored event details
+            event_type = info['details']['event_type']
+            expected_end = info['details']['expected_end']
+            delta = info['details']['delta']
+            
+            # Now, use these details to populate the unpaired_events dictionary
             unpaired_events[event] = {
                 'Missing_Status': 'off',
-                'Type': event_type,  # This might need adjustment to reflect accurate event details
-                'Timestamp': info['on'],
-                'Expected_End': expected_end,  # Similar note as above
-                'Delta': delta  # Similar note as above
-            }
+                'Type': event_type,
+                'Timestamp': info['on'],  # Timestamp of the "on" event
+                'Expected_End': expected_end,
+                'Delta': delta
 
    # return [(event, details['Missing_Status'], details['Type'], details['Timestamp'], details['Expected_Time'], details['Delta']) for event, details in unpaired_events.items()]
     return unpaired_events
@@ -90,7 +101,7 @@ def SendEmail(AlertData):
     sms_response = 'No SMS Required'
     emailto = "matt@griffiths.uk.net"
 
-    logging.info(f"Preparing email to matt@griffiths.uk.net:{messagetext}")
+
     for event, data in AlertData.items():
         
         # Access elements of the first entry
@@ -162,18 +173,28 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
     try:
         # Connect to MySQL
         logging.info(f"ConnectionString: {connection_string}")
-        logging.info("Starting mySQL Connection")
 
+        logging.info("Starting mySQL Connection")
         # Create an engine to connect to the database
         engine = create_engine(connection_string, echo=True)
+        logging.info("Connected")
         Session = sessionmaker(bind=engine)
         session = Session()
         
+        try:
+            # Attempt to execute a simple query to check the connection
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+                logging.info("Database connection is successful.")
+        except SQLAlchemyError as e:
+            logging.error(f"Database connection failed: {e}")
+
         # Define your SQL query using text()
         ResponseTime = datetime.now().isoformat()
+        truncated_string = ResponseMessage[:675]
         logging.info(f"Adding Parameters to SQL Query: {Member}, {ResponseMessage}, {Action}, {ResponseAddress}, {ResponseTime}")
 
-        sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, :response_time")
+        sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, :response_time)")
         
         logging.info("SQL Created. Adding Parameters to params object")
                 
@@ -191,8 +212,9 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
             # Execute the query with parameters as a dictionary
             connection.execute(sql, params)
             logging.info("Data inserted successfully")
+            connection.commit()
                
-    except Exception as e:
+    except SQLAlchemyError as e:
         logging.error("Database Execution Error", e)
         raise e
 
@@ -290,7 +312,7 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         if myTimer.past_due:    
             logging.info('The timer is past due!')
 
-        logging.info('First Responder Version 1.3 Build 12. Starting.')
+        logging.info('First Responder Version 1.3 Build 17. Starting.')
 
         
         url = "https://silversense.azurewebsites.net/data"
