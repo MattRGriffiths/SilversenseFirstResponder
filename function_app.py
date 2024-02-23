@@ -181,7 +181,7 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
         with engine.connect() as connection:
             # Execute the query with parameters as a dictionary
             connection.execute(sql, params)
-            session.commit()
+            connection.commit()
             # Commit the transaction
             logging.info("Data inserted successfully")
                
@@ -283,7 +283,7 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         if myTimer.past_due:    
             logging.info('The timer is past due!')
 
-        logging.info('First Responder Version 1.3.6. Startng.')
+        logging.info('First Responder Version 1.3.7. Startng.')
 
         
         url = "https://silversense.azurewebsites.net/data"
