@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 import os
 import json
+import datetime 
 
 def FindUnpairedEvents(df):
    # Ensure Event_Time is in datetime format and sort the DataFrame
@@ -168,21 +169,20 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
         session = Session()
 
         # Define your SQL query using text()
-        sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, NOW())")
-
-
+        sql = text("INSERT INTO actionresponse (Member, ResponseMessage, Action, ResponseAddress, ResponseTime) VALUES (:member, :response_message, :action, :response_address, :response_time")
+        current_timestamp = datetime.now().isoformat()
+        logging.info("Adding Parameters to SQL Query")
         params = {
             'member': Member,  # Ensure Member and others are defined
             'response_message': ResponseMessage,
             'action': Action,
-            'response_address': ResponseAddress
+            'response_address': ResponseAddress,
+            'response_time': current_timestamp
         }
-
+        # Execute the query
         with engine.connect() as connection:
             # Execute the query with parameters as a dictionary
             connection.execute(sql, params)
-            connection.commit()
-            # Commit the transaction
             logging.info("Data inserted successfully")
                
     except Exception as e:
@@ -283,7 +283,7 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         if myTimer.past_due:    
             logging.info('The timer is past due!')
 
-        logging.info('First Responder Version 1.3.7. Startng.')
+        logging.info('First Responder Version 1.3.8. Startng.')
 
         
         url = "https://silversense.azurewebsites.net/data"
