@@ -25,10 +25,13 @@ def FindUnpairedEvents(df):
     events = {}
     unpaired_events = {}
 
+
     for index, row in df.iterrows():
         event = row['EventName']
         state = row['State']
         event_type = row['Type']
+        if event == 'ADL-Julie-Home':
+            i=1
         timestamp = pd.to_datetime(row['Event_Time'])
         expected_end = pd.to_datetime(row['Expected_End'])
         delta = row['Delta']
@@ -42,13 +45,22 @@ def FindUnpairedEvents(df):
                 'timestamp': timestamp,  # Last timestamp seen for this event
                 'expected_end': expected_end,
                 'delta': delta
+            }   
 
         if state == 'on':
             if events[event]['on'] is not None and events[event]['off'] is None:
                 # If an "on" event occurs without an "off", update the unpaired event
                 unpaired_events[event] = f'Missing "off" before new "on" at {timestamp}'
+            #The indentation of this is critical.  It needs to be outside the else statement
             events[event]['on'] = timestamp
             events[event]['off'] = None  # Reset "off" when a new "on" is encountered
+            events[event]['details'] = {
+                'event_type': event_type,
+                'timestamp': timestamp,  # Last timestamp seen for this event
+                'expected_end': expected_end,
+                'delta': delta            
+            }
+            
         elif state == 'off':
             if events[event]['on'] is None:
                 # If an "off" event occurs without an "on", update the unpaired event
@@ -58,15 +70,14 @@ def FindUnpairedEvents(df):
                     'Type': event_type,
                     'Timestamp': timestamp,
                     'Expected_End': expected_end,
-                    'Delta': delta
-                    }
+                    'Delta': delta}
             else:
                 # Once a proper pair is completed, remove the event from unpaired if it exists
                 unpaired_events.pop(event, None)
+            #The indentation of this is critical.  It needs to be outside the else statement
             events[event]['on'] = None  # Reset "on" after an "off" is encountered
             events[event]['off'] = timestamp
 
-    # After processing all rows, check for any "on" events without a corresponding "off"
     for event, info in events.items():
         if info['on'] is not None:  # There's an "on" event without a corresponding "off" event
             # Retrieve previously stored event details
@@ -81,15 +92,9 @@ def FindUnpairedEvents(df):
                 'Timestamp': info['on'],  # Timestamp of the "on" event
                 'Expected_End': expected_end,
                 'Delta': delta
-
+            }
    # return [(event, details['Missing_Status'], details['Type'], details['Timestamp'], details['Expected_Time'], details['Delta']) for event, details in unpaired_events.items()]
     return unpaired_events
-
-# Example usage:
-# Ensure your DataFrame 'df' is properly defined with 'Event', 'Event_Time', and other columns as per your setup
-# unpaired_events = find_last_unpaired_events(df)
-# for event_info in unpaired_events:
-#     print(event_info)
 
 
 
@@ -115,7 +120,7 @@ def SendEmail(AlertData):
     if messagetext !=  '':
         try:
             # Send an SMS
-            logging.info(f"Preparing email to matt@griffiths.uk.net:{messagetext}")
+            logging.info(f"Preparing email to {emailto}:{messagetext}")
 
                 #Get the connection string from the environment variable
             connection_string = os.getenv('CUSTOMCONNSTR_SilverSenseEmail')
@@ -139,7 +144,7 @@ def SendEmail(AlertData):
                 # Send the email
                 poller = client.begin_send(message)
                 result = poller.result()
-                logging.info(f"Email sent to matt@griffiths.uk.net. Result:{result}")
+                logging.info(f"Email sent to {emailto}. Result:{result}")
                     
             except Exception as e:
                 #expect error here when pulling duplicate events / actions
@@ -176,7 +181,7 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
 
         logging.info("Starting mySQL Connection")
         # Create an engine to connect to the database
-        engine = create_engine(connection_string, echo=True)
+        engine = create_engine(connection_string, echo=False)
         logging.info("Connected")
         Session = sessionmaker(bind=engine)
         session = Session()
@@ -185,7 +190,7 @@ def LogResponse(Member,ResponseMessage, Action, ResponseAddress):
             # Attempt to execute a simple query to check the connection
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
-                logging.info("Database connection is successful.")
+                logging.info("Database connection Successful.")
         except SQLAlchemyError as e:
             logging.error(f"Database connection failed: {e}")
 
@@ -312,7 +317,7 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         if myTimer.past_due:    
             logging.info('The timer is past due!')
 
-        logging.info('First Responder Version 1.3 Build 17. Starting.')
+        logging.info('First Responder Version 1.4 Build 1. Starting.')
 
         
         url = "https://silversense.azurewebsites.net/data"
