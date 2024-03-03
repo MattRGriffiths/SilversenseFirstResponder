@@ -12,8 +12,10 @@ from sqlalchemy.exc import SQLAlchemyError
 import os
 import json
 from datetime import datetime
+import pytz
+#from durable.lang import *
 
-def FindUnpairedEvents(df):
+def FindUnpairedEvents(df, localtime):
    # Ensure Event_Time is in datetime format and sort the DataFrame
     df['Event_Time'] = pd.to_datetime(df['Event_Time'])
     df = df.sort_values(by='Event_Time', ascending=True)
@@ -30,69 +32,41 @@ def FindUnpairedEvents(df):
         event = row['EventName']
         state = row['State']
         event_type = row['Type']
-        if event == 'ADL-Julie-Home':
-            i=1
         timestamp = pd.to_datetime(row['Event_Time'])
+        data_time = pd.to_datetime(localtime)
+        expected_start = pd.to_datetime(row['Expected_Start'])
         expected_end = pd.to_datetime(row['Expected_End'])
+
+        if expected_start.tzinfo is None:
+            expected_start = pytz.utc.localize(expected_start)
+        if expected_end.tzinfo is None:
+            expected_end = pytz.utc.localize(expected_end)
+
         delta = row['Delta']
+        if event_type == 'Active':
 
-        if event not in events:
-            events[event] = {'on': None, 'off': None, 'details': {}}
-
-            # Update or add additional details
-            events[event]['details'] = {
-                'event_type': event_type,
-                'timestamp': timestamp,  # Last timestamp seen for this event
-                'expected_end': expected_end,
-                'delta': delta
-            }   
-
-        if state == 'on':
-            if events[event]['on'] is not None and events[event]['off'] is None:
-                # If an "on" event occurs without an "off", update the unpaired event
-                unpaired_events[event] = f'Missing "off" before new "on" at {timestamp}'
-            #The indentation of this is critical.  It needs to be outside the else statement
-            events[event]['on'] = timestamp
-            events[event]['off'] = None  # Reset "off" when a new "on" is encountered
-            events[event]['details'] = {
-                'event_type': event_type,
-                'timestamp': timestamp,  # Last timestamp seen for this event
-                'expected_end': expected_end,
-                'delta': delta            
-            }
-            
-        elif state == 'off':
-            if events[event]['on'] is None:
-                # If an "off" event occurs without an "on", update the unpaired event
+            if (state == 'on' and data_time < expected_start) :
                 unpaired_events[event] = {
                     'Event':event,
-                    'Missing_Status' :'on',
+                    'Missing_Status' :state,
                     'Type': event_type,
-                    'Timestamp': timestamp,
-                    'Expected_End': expected_end,
+                    'Timestamp': data_time ,
+                    'Expected_Start': expected_start,
+                    'Expected_End': timestamp,
                     'Delta': delta}
-            else:
-                # Once a proper pair is completed, remove the event from unpaired if it exists
-                unpaired_events.pop(event, None)
-            #The indentation of this is critical.  It needs to be outside the else statement
-            events[event]['on'] = None  # Reset "on" after an "off" is encountered
-            events[event]['off'] = timestamp
-
-    for event, info in events.items():
-        if info['on'] is not None:  # There's an "on" event without a corresponding "off" event
-            # Retrieve previously stored event details
-            event_type = info['details']['event_type']
-            expected_end = info['details']['expected_end']
-            delta = info['details']['delta']
             
-            # Now, use these details to populate the unpaired_events dictionary
-            unpaired_events[event] = {
-                'Missing_Status': 'off',
-                'Type': event_type,
-                'Timestamp': info['on'],  # Timestamp of the "on" event
-                'Expected_End': expected_end,
-                'Delta': delta
-            }
+            
+            elif  (state == 'off' and data_time > expected_end):
+
+                    unpaired_events[event] = {
+                        'Event':event,
+                        'Missing_Status' :state,
+                        'Type': event_type,
+                        'Timestamp': timestamp,
+                        'Expected_Start': timestamp,
+                        'Expected_End': expected_end,
+                        'Delta': delta}
+
    # return [(event, details['Missing_Status'], details['Type'], details['Timestamp'], details['Expected_Time'], details['Delta']) for event, details in unpaired_events.items()]
     return unpaired_events
 
@@ -111,7 +85,7 @@ def SendEmail(AlertData):
         
         # Access elements of the first entry
 
-        if data['Type'] == 'Missed':
+        if data['Type'] == 'Missed' or data['Type'] == 'Active':
             # Build the message string with other values except for delta since that creates a unique value for each event
             logmessage += f"Silversense Alert: Event: {event} : {data['Missing_Status']}, Status: {data['Type']}, Expected From: {data['Expected_End']}."
             #This is the message that will be sent to the email
@@ -306,6 +280,8 @@ def SendSMS(AlertData):
     return sms_response
 
 
+
+
 app = func.FunctionApp()
 
 @app.schedule(schedule="0 */5 * * * *", arg_name="myTimer", run_on_startup=True,
@@ -313,13 +289,17 @@ app = func.FunctionApp()
 
 def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
 
-    try:
+   
         if myTimer.past_due:    
             logging.info('The timer is past due!')
 
         logging.info('First Responder Version 1.4 Build 1. Starting.')
 
-        
+        Main()
+
+def Main() -> None:
+
+    try:
         url = "https://silversense.azurewebsites.net/data"
 
          
@@ -327,7 +307,8 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
         #params_env_str = "{\"member\": \"Griffiths0001\", \"useday\": \"false\", \"starthour\": \"05\", \"mincluster\": \"3\", \"debug\": \"none\", \"threshold\": \"20\", \"grouptime\": \"0\"}"
         params_env_str = os.getenv('SilverSenseURLParam')
        
-
+        if params_env_str is None:params_env_str = "{\"member\": \"Griffiths0001\", \"useday\": \"true\", \"starthour\": \"05\", \"mincluster\": \"3\", \"debug\": \"none\", \"threshold\": \"20\", \"grouptime\": \"0\"}"
+        
         # Convert the string back to a dictionary
         logging.info(f"Loading {params_env_str} into json object.  Checking type.")
         params_env = json.loads(params_env_str)
@@ -362,10 +343,15 @@ def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
             try:
                 #Check returned data set for 2 things
                 # 1.  Are there any events that are on but no off, or off but no on.  E.g. Not returned from dogwalk, not returned to bed, door open not closed. 
-                UnpairedData = FindUnpairedEvents(data)
+                local_timezone = pytz.timezone('Europe/London')
+                data_timezone =  pytz.timezone('UTC')         
+
+                # Get the current time in the specified timezone    
+                data_time = datetime.now(data_timezone)
+                UnpairedData = FindUnpairedEvents(data, data_time)
                 logging.info(f"Alert Events: {UnpairedData}")
                 # Then 2. Are any of those considered Missing
-                SendEmail(UnpairedData)
+                if len(UnpairedData) > 0: SendEmail(UnpairedData)
                 #SendSMS(UnpairedData)
 
             except Exception as e:

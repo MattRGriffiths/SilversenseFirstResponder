@@ -9,3 +9,4 @@ azure-communication-sms~=1.0
 azure.communication.email
 pymysql
 sqlalchemy
+durable-rules
