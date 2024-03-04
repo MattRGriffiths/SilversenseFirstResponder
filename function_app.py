@@ -63,7 +63,7 @@ def FindUnpairedEvents(df, localtime):
                         'Missing_Status' :state,
                         'Type': event_type,
                         'Timestamp': timestamp,
-                        'Expected_Start': timestamp,
+                        'Expected_Start': expected_start,
                         'Expected_End': expected_end,
                         'Delta': delta}
 
@@ -87,13 +87,14 @@ def SendEmail(AlertData):
 
         if data['Type'] == 'Missed' or data['Type'] == 'Active':
             # Build the message string with other values except for delta since that creates a unique value for each event
-            logmessage += f"Silversense Alert: Event: {event} : {data['Missing_Status']}, Status: {data['Type']}, Expected From: {data['Expected_End']}."
+            logmessage += f"Event: {event} : {data['Missing_Status']}. Status: {data['Type']}. Expected at: {data['Expected_End']}."
             #This is the message that will be sent to the email
-            messagetext += f"Silversense Alert: Event: {event} : {data['Missing_Status']}, Status: {data['Type']}, Expected From: {data['Expected_End']}. Variance {data['Delta']}. "
+            messagetext += f"Event: {event} : {data['Missing_Status']}. Status: {data['Type']}. Expected At: {data['Expected_End']}. Variance: {data['Delta']} mins. "
 
     if messagetext !=  '':
         try:
             # Send an SMS
+            messagetext = f"Silversense Alert: {messagetext}"
             logging.info(f"Preparing email to {emailto}:{messagetext}")
 
                 #Get the connection string from the environment variable
