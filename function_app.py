@@ -285,7 +285,7 @@ def SendSMS(AlertData):
 
 app = func.FunctionApp()
 
-@app.schedule(schedule="0 */5 * * * *", arg_name="myTimer", run_on_startup=True,
+@app.schedule(schedule="0 */15 * * * *", arg_name="myTimer", run_on_startup=True,
               use_monitor=False) 
 
 def SilververSenseFirstResponder(myTimer: func.TimerRequest) -> None:
